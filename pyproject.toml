@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mono-axiom"
+version = "0.0.1"
+description = "Personal AI intelligence stack — five composable layers, built from scratch."
+authors = [{ name = "Mikel Taopa" }]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.14"
+keywords = ["ai", "llm", "rag", "orchestration", "obsidian"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: POSIX :: Linux",
+]
+# Runtime dependencies stay empty until a layer actually needs them.
+# Each layer should justify every dep it adds.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Repository = "https://github.com/disposably-mono/mono-AXIOM"
+
+# ─── Package discovery ─────────────────────────────────
+# Filesystem dirs use hyphens (axiom-store) but Python imports
+# need underscores (axiom_store). The `package-dir` mapping
+# bridges that gap so `from axiom_store import ...` works.
+[tool.setuptools]
+package-dir = { axiom_store = "axiom-store", axiom_queue = "axiom-queue", axiom_fetch = "axiom-fetch", axiom_brain = "axiom-brain", axiom_api = "axiom-api" }
+
+[tool.setuptools.packages.find]
+where = ["axiom-store", "axiom-queue", "axiom-fetch", "axiom-brain", "axiom-api"]
+
+# ─── Tooling ───────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
