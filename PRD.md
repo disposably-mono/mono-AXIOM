@@ -2,8 +2,8 @@
 ### A Personal AI Intelligence Stack — Product Requirements Document
 
 **Author:** Mono (Mikel Taopa)
-**Version:** 1.0
-**Status:** Locked
+**Version:** 1.1
+**Status:** Active
 **Last Updated:** May 20, 2026
 **Target Completion Window:** ~90 days (pre-ADMU, August 2026)
 
@@ -43,7 +43,7 @@ The end state is a unified system accessible through a web dashboard, capable of
 
 ## 4. Vault Architecture
 
-All persistent state lives in a single directory: `/mono-vault/`. Every file is human-readable Markdown with YAML frontmatter for metadata.
+All persistent state lives in a single directory: `/mono-vault/`. Every file is human-readable Markdown with YAML frontmatter for metadata. System-level reference documents (`PRD.md`, `Documentation.md`) live in `system/` as plain Markdown without frontmatter.
 
 ```
 mono-vault/
@@ -58,6 +58,8 @@ mono-vault/
 │   └── uploads/
 ├── jobs/
 ├── system/
+│   ├── PRD.md
+│   └── Documentation.md
 └── exports/
 ```
 
@@ -185,18 +187,112 @@ Rationale: Fits fully in 4GB VRAM with headroom for context. Supports tool calli
 
 | Phase | Weeks | Focus |
 |---|---|---|
-| 0. Foundations | 1–2 | Read networking basics (Kurose Ch.1–2), socket programming primer, study Markdown/YAML parsing |
-| 1. `axiom-store` | 3–5 | Build the Markdown-backed store with TCP interface and write-through cache |
-| 2. `axiom-queue` | 6–8 | Build the job system, workers, retries |
-| 3. `axiom-fetch` | 9–11 | Build the retrieval and chunking pipeline |
-| 4. `axiom-brain` | 12–15 | Build provider abstraction, intent routing, tool-calling loop, memory commands |
-| 5. `axiom-api` | 16–18 | Build the FastAPI gateway, web dashboard, streaming, settings UI, exports |
+| 0. Foundations | 1–2 | Networking basics, socket programming, Markdown/YAML parsing, project scaffolding |
+| 1. `axiom-store` | 3–5 | Markdown-backed store with TCP interface and write-through cache |
+| 2. `axiom-queue` | 6–8 | Job system, workers, retries |
+| 3. `axiom-fetch` | 9–11 | Retrieval and chunking pipeline |
+| 4. `axiom-brain` | 12–15 | Provider abstraction, intent routing, tool-calling loop, memory commands |
+| 5. `axiom-api` | 16–18 | FastAPI gateway, web dashboard, streaming, settings UI, exports |
 
 Each phase ends with its milestone being demonstrably working before moving on. If timing slips, layers 4 and 5 are scoped down — but never skipped.
 
 ---
 
-## 9. Success Criteria
+## 9. Project Checklist
+
+Progress tracker across all phases. Check off items as they are confirmed working.
+
+### Phase 0 — Foundations
+
+- [x] Project named and philosophy finalized
+- [x] Repository created (`disposably-mono/mono-AXIOM`, public, Apache 2.0)
+- [x] Full scaffold committed — five layer stubs, `pyproject.toml`, `.gitignore`, `.env.example`, `LICENSE`
+- [x] Vault skeleton committed (`mono-vault.example/`) with documented frontmatter schemas
+- [x] `bootstrap_vault.py` working and verified
+- [x] `PRD.md` and `Documentation.md` in repo and in `mono-vault/system/`
+- [ ] Read Kurose Ch. 1 — Computer Networks and the Internet
+- [ ] Read Kurose Ch. 2.1–2.4 — Application layer, HTTP, sockets intro
+- [ ] Read Kurose Ch. 3.1–3.4 — Transport layer, TCP basics
+- [ ] Watch Beazley "Python Concurrency from the Ground Up" (PyCon 2015)
+- [ ] Read Beej's Guide Ch. 1–5
+- [ ] Read Python `socket` module docs
+- [ ] Read Python `asyncio` — Coroutines and Tasks (first two sections)
+- [ ] Read Python `multiprocessing` docs — Introduction
+- [ ] Read YAML 1.2 spec Ch. 1 + `pyyaml` docs
+- [ ] Exercise: write `parse_frontmatter(path) -> tuple[dict, str]` from scratch
+- [ ] Exercise: write a toy TCP echo server in Python using raw `socket`
+
+### Phase 1 — `axiom-store`
+
+- [ ] Concept understood: TCP framing problem (message boundaries)
+- [ ] Concept understood: write-through cache
+- [ ] Concept understood: YAML frontmatter schema validation
+- [ ] Implement `parse_frontmatter` and `render_frontmatter` in `axiom-store`
+- [ ] Implement vault file read/write (filesystem layer)
+- [ ] Implement in-memory write-through cache
+- [ ] Implement TCP server (accept connections, handle requests)
+- [ ] Implement TCP client (used by other layers)
+- [ ] Define and implement message framing protocol
+- [ ] Schema validation for all vault content types
+- [ ] Milestone confirmed: read/write vault entries over TCP without touching filesystem directly
+
+### Phase 2 — `axiom-queue`
+
+- [ ] Concept understood: GIL and why multiprocessing over threading for CPU work
+- [ ] Concept understood: IPC between main process and workers
+- [ ] Concept understood: idempotency and why it matters for retries
+- [ ] Implement job file creation in `mono-vault/jobs/`
+- [ ] Implement worker process pool
+- [ ] Implement job pickup (worker reads pending job files)
+- [ ] Implement retry logic with exponential backoff
+- [ ] Implement job status updates (written back to vault via `axiom-store`)
+- [ ] Milestone confirmed: submit a job, worker executes, result lands in vault
+
+### Phase 3 — `axiom-fetch`
+
+- [ ] Concept understood: HTTP request/response cycle
+- [ ] Concept understood: HTML parsing and content extraction
+- [ ] Concept understood: chunking strategies and overlap for RAG
+- [ ] Implement web fetch via `httpx`
+- [ ] Implement HTML → Markdown conversion
+- [ ] Implement PDF ingestion
+- [ ] Implement `.docx` ingestion
+- [ ] Implement chunker (configurable size + overlap)
+- [ ] Implement source and chunk persistence to vault
+- [ ] Milestone confirmed: URL or uploaded file produces retrievable chunks in vault
+
+### Phase 4 — `axiom-brain`
+
+- [ ] Concept understood: provider API patterns (Anthropic, OpenAI, Ollama)
+- [ ] Concept understood: tool-calling loop (inference → parse → execute → re-inject)
+- [ ] Concept understood: context window management and overflow
+- [ ] Implement provider abstraction base class
+- [ ] Implement Anthropic provider
+- [ ] Implement OpenAI provider
+- [ ] Implement Ollama provider (Qwen3 4B)
+- [ ] Implement intent classifier and routing rules
+- [ ] Implement tool-calling loop
+- [ ] Implement memory commands (read, write, summarize via `axiom-store`)
+- [ ] Implement context overflow handler (rolling summaries)
+- [ ] Milestone confirmed: single turn routes to correct provider, calls a tool, writes a fact, returns coherent response
+
+### Phase 5 — `axiom-api`
+
+- [ ] Concept understood: server-sent events vs WebSockets
+- [ ] Concept understood: FastAPI middleware and request lifecycle
+- [ ] Implement FastAPI app skeleton and routing
+- [ ] Implement `/chat` endpoint with SSE streaming
+- [ ] Implement memory browser endpoints (list, read, write)
+- [ ] Implement RAG upload endpoint
+- [ ] Implement job monitoring endpoints
+- [ ] Implement settings endpoints (provider keys, routing, vault path)
+- [ ] Implement export endpoints (conversation, vault zip, session)
+- [ ] Implement frontend (React or vanilla JS — TBD)
+- [ ] Milestone confirmed: full web app running locally without terminal access
+
+---
+
+## 10. Success Criteria
 
 By August 2026, Mono-AXIOM is considered complete when:
 
@@ -210,7 +306,7 @@ By August 2026, Mono-AXIOM is considered complete when:
 
 ---
 
-## 10. What This Portfolio Demonstrates
+## 11. What This Portfolio Demonstrates
 
 To a reader of this codebase, Mono-AXIOM shows:
 
