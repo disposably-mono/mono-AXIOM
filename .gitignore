@@ -38,6 +38,9 @@ secrets/
 # ─── The vault (lives on disk, never in git) ───────────
 mono-vault/
 
+# ─── Practice excercises (diposable, never in git) ───────────
+scratch/
+
 # ─── Local caches & databases ──────────────────────────
 *.db
 *.sqlite
