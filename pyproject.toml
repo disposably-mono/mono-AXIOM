@@ -12,21 +12,16 @@ readme = "README.md"
 requires-python = ">=3.14"
 keywords = ["ai", "llm", "rag", "orchestration", "obsidian"]
 classifiers = [
-    "Development Status :: 1 - Planning",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3.14",
-    "Operating System :: POSIX :: Linux",
+  "Development Status :: 1 - Planning",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: POSIX :: Linux",
 ]
-# Runtime dependencies stay empty until a layer actually needs them.
-# Each layer should justify every dep it adds.
-dependencies = []
+# Runtime dependencies should stay small; each layer should justify every dep it adds.
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "ruff>=0.5",
-    "mypy>=1.10",
-]
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
 
 [project.urls]
 Repository = "https://github.com/disposably-mono/mono-AXIOM"
@@ -36,10 +31,8 @@ Repository = "https://github.com/disposably-mono/mono-AXIOM"
 # need underscores (axiom_store). The `package-dir` mapping
 # bridges that gap so `from axiom_store import ...` works.
 [tool.setuptools]
+packages = ["axiom_store", "axiom_queue", "axiom_fetch", "axiom_brain", "axiom_api"]
 package-dir = { axiom_store = "axiom-store", axiom_queue = "axiom-queue", axiom_fetch = "axiom-fetch", axiom_brain = "axiom-brain", axiom_api = "axiom-api" }
-
-[tool.setuptools.packages.find]
-where = ["axiom-store", "axiom-queue", "axiom-fetch", "axiom-brain", "axiom-api"]
 
 # ─── Tooling ───────────────────────────────────────────
 [tool.ruff]
@@ -50,5 +43,11 @@ target-version = "py314"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+  "axiom-store/tests",
+  "axiom-queue/tests",
+  "axiom-fetch/tests",
+  "axiom-brain/tests",
+  "axiom-api/tests",
+]
 python_files = ["test_*.py"]
