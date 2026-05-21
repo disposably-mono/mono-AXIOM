@@ -2,9 +2,9 @@
 ### A Personal AI Intelligence Stack — Product Requirements Document
 
 **Author:** Mono (Mikel Taopa)
-**Version:** 1.1
+**Version:** 1.2
 **Status:** Active
-**Last Updated:** May 20, 2026
+**Last Updated:** May 21, 2026
 **Target Completion Window:** ~90 days (pre-ADMU, August 2026)
 
 ---
@@ -174,25 +174,29 @@ Rationale: Fits fully in 4GB VRAM with headroom for context. Supports tool calli
 | Component | Choice | Reasoning |
 |---|---|---|
 | Language | Python 3.14 | User comfort, fast iteration |
-| API framework | FastAPI | Modern, async-native, streaming support |
-| Local inference | Ollama + Qwen3 4B | Fits hardware, tool-use capable |
+| Packaging | `setuptools` + `pyproject.toml`, editable install | Standard library tooling. Hyphen-folder layout (e.g. `axiom-store/`) mapped to underscore Python imports (`axiom_store`) via explicit `[tool.setuptools] packages` + `package-dir`. Auto-discovery (`find`) does not work with the flat per-layer layout. |
+| YAML parsing | `PyYAML>=6.0` (`safe_load`, `safe_dump`) | First and only runtime dependency in Phase 1. Required for frontmatter. `safe_load` rejects arbitrary Python object construction. |
+| API framework | FastAPI | Modern, async-native, streaming support (Phase 5) |
+| Local inference | Ollama + Qwen3 4B | Fits hardware, tool-use capable (Phase 4) |
 | Storage format | Markdown + YAML frontmatter | Human-readable, Obsidian-compatible |
-| Concurrency | Python `asyncio` + worker processes | Standard library, no extra deps |
+| Concurrency | Python `asyncio` + worker processes | Standard library, no extra deps. `axiom-store` itself is single-threaded one-shot TCP — concurrency arrives in Phase 2 with `axiom-queue` workers. |
 | Frontend | React or vanilla JS (TBD in Phase 5) | User has JS comfort, React optional |
 | Editor environment | Neovim + VS Code on Fedora 44 | User's confirmed setup |
+| Testing | `pytest>=8.0` (dev dependency) | Per-layer `tests/` directories enumerated in `[tool.pytest.ini_options] testpaths`. |
+| Linting | `ruff>=0.5`, `mypy>=1.10` (dev dependencies) | Strict but light-weight. |
 
 ---
 
 ## 8. Phased Build Timeline
 
-| Phase | Weeks | Focus |
-|---|---|---|
-| 0. Foundations | 1–2 | Networking basics, socket programming, Markdown/YAML parsing, project scaffolding |
-| 1. `axiom-store` | 3–5 | Markdown-backed store with TCP interface and write-through cache |
-| 2. `axiom-queue` | 6–8 | Job system, workers, retries |
-| 3. `axiom-fetch` | 9–11 | Retrieval and chunking pipeline |
-| 4. `axiom-brain` | 12–15 | Provider abstraction, intent routing, tool-calling loop, memory commands |
-| 5. `axiom-api` | 16–18 | FastAPI gateway, web dashboard, streaming, settings UI, exports |
+| Phase | Weeks | Focus | Status |
+|---|---|---|---|
+| 0. Foundations | 1–2 | Networking basics, socket programming, Markdown/YAML parsing, project scaffolding | Complete |
+| 1. `axiom-store` | 3–5 | Markdown-backed store with TCP interface and write-through cache | **Complete** |
+| 2. `axiom-queue` | 6–8 | Job system, workers, retries | Next |
+| 3. `axiom-fetch` | 9–11 | Retrieval and chunking pipeline | Pending |
+| 4. `axiom-brain` | 12–15 | Provider abstraction, intent routing, tool-calling loop, memory commands | Pending |
+| 5. `axiom-api` | 16–18 | FastAPI gateway, web dashboard, streaming, settings UI, exports | Pending |
 
 Each phase ends with its milestone being demonstrably working before moving on. If timing slips, layers 4 and 5 are scoped down — but never skipped.
 
@@ -219,22 +223,26 @@ Progress tracker across all phases. Check off items as they are confirmed workin
 - [ ] Read Python `asyncio` — Coroutines and Tasks (first two sections)
 - [ ] Read Python `multiprocessing` docs — Introduction
 - [ ] Read YAML 1.2 spec Ch. 1 + `pyyaml` docs
-- [ ] Exercise: write `parse_frontmatter(path) -> tuple[dict, str]` from scratch
-- [ ] Exercise: write a toy TCP echo server in Python using raw `socket`
+- [x] Exercise: write `parse_frontmatter(path) -> tuple[dict, str]` from scratch
+- [x] Exercise: write a toy TCP echo server in Python using raw `socket`
+
+External readings remain on the list but are no longer Phase 2 blockers — the concepts have been encountered in practice during Phase 1. Reading them remains valuable for reinforcement.
 
 ### Phase 1 — `axiom-store`
 
-- [ ] Concept understood: TCP framing problem (message boundaries)
-- [ ] Concept understood: write-through cache
-- [ ] Concept understood: YAML frontmatter schema validation
-- [ ] Implement `parse_frontmatter` and `render_frontmatter` in `axiom-store`
-- [ ] Implement vault file read/write (filesystem layer)
-- [ ] Implement in-memory write-through cache
-- [ ] Implement TCP server (accept connections, handle requests)
-- [ ] Implement TCP client (used by other layers)
-- [ ] Define and implement message framing protocol
-- [ ] Schema validation for all vault content types
-- [ ] Milestone confirmed: read/write vault entries over TCP without touching filesystem directly
+- [x] Concept understood: TCP framing problem (message boundaries)
+- [x] Concept understood: write-through cache
+- [x] Concept understood: YAML frontmatter schema validation
+- [x] Implement `parse_frontmatter` and `render_frontmatter` in `axiom-store`
+- [x] Implement vault file read/write (filesystem layer)
+- [x] Implement in-memory write-through cache
+- [x] Implement TCP server (accept connections, handle requests)
+- [x] Implement TCP client (used by other layers)
+- [x] Define and implement message framing protocol
+- [x] Schema validation for all vault content types
+- [x] Milestone confirmed: read/write vault entries over TCP without touching filesystem directly
+
+**Phase 1 complete.** Hybrid `\n`-delimited header + length-prefixed body protocol. One-shot connections. Write-through cache over a path-disciplined `VaultFS`. `StoreClient` substitutable for `CachedVaultStore` from any caller's perspective. 130 tests passing. End-to-end demo in `scripts/demo_axiom_store.py`.
 
 ### Phase 2 — `axiom-queue`
 
