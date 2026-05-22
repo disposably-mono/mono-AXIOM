@@ -52,12 +52,22 @@ PERSONA = Schema(
 )
 
 JOB = Schema(
-    required={"type": str, "status": str, "created": str},
-    optional={
-        "scheduled_for": str,
+    required={
+        "id": str,
+        "kind": str,
+        "status": str,
+        "created_at": str,
+        "updated_at": str,
         "attempts": int,
-        "last_error": str,
-        "result_path": str,
+        "max_attempts": int,
+        "payload": dict,
+    },
+    optional={
+        "result": dict,
+        "error": str,
+        "next_attempt_at": str,
+        "worker_id": str,
+        "claimed_at": str,
         "tags": list,
     },
 )

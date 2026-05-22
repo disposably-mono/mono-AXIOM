@@ -1,6 +1,5 @@
 """
 axiom-store: persistent state layer for Mono-AXIOM.
-
 Markdown-backed vault store with a TCP interface and write-through cache.
 Implements: frontmatter parsing/rendering, filesystem layer, write-through
 cache, schema validation, hybrid framing protocol, TCP server, TCP client.
@@ -26,6 +25,13 @@ from axiom_store.protocol import (
     parse_response_headers,
 )
 from axiom_store.schema import (
+    CONVERSATION,
+    FACT,
+    FETCH_CHUNK,
+    FETCH_SOURCE,
+    JOB,
+    PERSONA,
+    SUMMARY,
     Schema,
     SchemaError,
     schema_for,
@@ -33,14 +39,21 @@ from axiom_store.schema import (
 )
 
 __all__ = [
+    "CONVERSATION",
     "CachedVaultStore",
+    "FACT",
+    "FETCH_CHUNK",
+    "FETCH_SOURCE",
     "FrontmatterError",
     "InvalidVaultPath",
+    "JOB",
+    "PERSONA",
     "ProtocolError",
     "Request",
     "RequestStub",
     "Response",
     "ResponseStub",
+    "SUMMARY",
     "Schema",
     "SchemaError",
     "StoreClient",

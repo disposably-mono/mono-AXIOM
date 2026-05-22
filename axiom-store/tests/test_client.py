@@ -7,12 +7,12 @@ import pytest
 from axiom_store.client import StoreClient, StoreError
 from axiom_store.filesystem import InvalidVaultPath
 from axiom_store.schema import SchemaError
-from tests.test_server import _LocalServer  # reuse the threaded test server
+from axiom_store.test_utils import LocalServer
 
 
 @pytest.fixture
 def setup(tmp_path: Path):
-    server = _LocalServer(tmp_path).start()
+    server = LocalServer(tmp_path).start()
     client = StoreClient(host=server.host, port=server.port)
     yield client, tmp_path
     server.stop()
