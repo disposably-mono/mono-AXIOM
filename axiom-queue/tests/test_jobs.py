@@ -15,12 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from axiom_queue import jobs
 from axiom_queue.jobs import (
     DEFAULT_MAX_ATTEMPTS,
-    STATUS_DEAD,
-    STATUS_FAILED,
     STATUS_PENDING,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
@@ -228,6 +225,18 @@ class TestStoreIO:
             write_job(live_store, job)
             ids.append(job.id)
         assert sorted(list_jobs(live_store)) == sorted(ids)
+
+    def test_list_jobs_ignores_scaffold_readme_on_disk(self, tmp_path: Path):
+        jobs_dir = tmp_path / "jobs"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        (jobs_dir / "README.md").write_text("# jobs/\n", encoding="utf-8")
+
+        server = LocalServer(tmp_path).start()
+        client = StoreClient(host=server.host, port=server.port)
+        try:
+            assert list_jobs(client) == []
+        finally:
+            server.stop()
 
     def test_read_missing_job_raises(self, live_store: StoreClient):
         with pytest.raises(FileNotFoundError):

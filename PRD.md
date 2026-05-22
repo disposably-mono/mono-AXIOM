@@ -254,9 +254,12 @@ External readings remain on the list but are no longer Phase 2 blockers — the 
 - [x] Implement job pickup (worker reads pending job files)
 - [x] Implement retry logic with exponential backoff
 - [x] Implement job status updates (written back to vault via `axiom-store`)
+- [x] Implement watchdog reclaim for stalled running jobs
+- [x] Implement dispatcher CLI entry point and pidfile guard
+- [x] Implement queue demo script
 - [x] Milestone confirmed: submit a job, worker executes, result lands in vault
 
-Phase 2 currently ships one pidfile-guarded dispatcher service with one worker loop and one watchdog loop. True multi-worker pooling remains deferred until the store has an atomic claim primitive.
+Phase 2 currently ships one pidfile-guarded dispatcher service with one worker loop and one watchdog loop. True multi-worker pooling remains deferred until the store has an atomic claim primitive. The local demo path is anchored to `/home/mono/Projects/mono-axiom/mono-vault`.
 
 ### Phase 3 — `axiom-fetch`
 

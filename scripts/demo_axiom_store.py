@@ -2,7 +2,7 @@
 End-to-end demo of axiom-store.
 
 Run the server in one terminal:
-    python -m axiom_store.server --vault ~/projects/mono-axiom/mono-vault -v
+    python -m axiom_store.server --vault /home/mono/Projects/mono-axiom/mono-vault -v
 
 Then run this script in another terminal:
     python scripts/demo_axiom_store.py

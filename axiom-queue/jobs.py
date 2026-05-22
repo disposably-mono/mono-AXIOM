@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from axiom_queue.ids import new_job_id, now_iso
 from axiom_store import (
     JOB,
     SchemaError,
@@ -34,8 +35,6 @@ from axiom_store import (
     schema_for,
     validate,
 )
-
-from axiom_queue.ids import new_job_id, now_iso
 
 # Status vocabulary. Keep in sync with the state machine in PRD.
 STATUS_PENDING = "pending"
@@ -231,8 +230,10 @@ def read_job(client: StoreClient, job_id: str) -> Job:
 def list_jobs(client: StoreClient) -> list[str]:
     """Return job IDs (filenames in jobs/ minus the .md suffix), sorted.
 
-    Files not ending in .md are skipped — keeps stray Obsidian files
-    or editor backups from breaking the listing.
+    Files not ending in .md are skipped. The scaffold README is also
+    skipped — it is documentation, not a job file.
     """
     filenames = client.list_dir("jobs/")
-    return sorted(name[:-3] for name in filenames if name.endswith(".md"))
+    return sorted(
+        name[:-3] for name in filenames if name.endswith(".md") and name != "README.md"
+    )
