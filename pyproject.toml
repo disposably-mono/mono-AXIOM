@@ -26,6 +26,9 @@ dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
 [project.urls]
 Repository = "https://github.com/disposably-mono/mono-AXIOM"
 
+[project.scripts]
+axiom-queue = "axiom_queue.dispatcher:main"
+
 # ─── Package discovery ─────────────────────────────────
 # Filesystem dirs use hyphens (axiom-store) but Python imports
 # need underscores (axiom_store). The `package-dir` mapping

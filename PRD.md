@@ -246,15 +246,17 @@ External readings remain on the list but are no longer Phase 2 blockers — the 
 
 ### Phase 2 — `axiom-queue`
 
-- [ ] Concept understood: GIL and why multiprocessing over threading for CPU work
-- [ ] Concept understood: IPC between main process and workers
-- [ ] Concept understood: idempotency and why it matters for retries
-- [ ] Implement job file creation in `mono-vault/jobs/`
+- [x] Concept understood: GIL and why multiprocessing over threading for CPU work
+- [x] Concept understood: IPC between main process and workers
+- [x] Concept understood: idempotency and why it matters for retries
+- [x] Implement job file creation in `mono-vault/jobs/`
 - [ ] Implement worker process pool
-- [ ] Implement job pickup (worker reads pending job files)
-- [ ] Implement retry logic with exponential backoff
-- [ ] Implement job status updates (written back to vault via `axiom-store`)
-- [ ] Milestone confirmed: submit a job, worker executes, result lands in vault
+- [x] Implement job pickup (worker reads pending job files)
+- [x] Implement retry logic with exponential backoff
+- [x] Implement job status updates (written back to vault via `axiom-store`)
+- [x] Milestone confirmed: submit a job, worker executes, result lands in vault
+
+Phase 2 currently ships one pidfile-guarded dispatcher service with one worker loop and one watchdog loop. True multi-worker pooling remains deferred until the store has an atomic claim primitive.
 
 ### Phase 3 — `axiom-fetch`
 

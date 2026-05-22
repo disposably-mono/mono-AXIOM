@@ -8,8 +8,8 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 ## Current state
 
-**Phase:** 2 — `axiom-queue`: in progress (data layer complete; worker, watchdog, dispatcher not yet built)
-**Active work:** `axiom-queue/worker.py` is the next implementation step.
+**Phase:** 2 — `axiom-queue`: in progress (dispatcher complete; Phase 2 milestone path working)
+**Active work:** Phase 2 docs/demo hardening and final milestone confirmation.
 
 ---
 
@@ -18,7 +18,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 | Layer | Status | Notes |
 |---|---|---|
 | `axiom-store` | Complete | TCP-accessible Markdown store with write-through cache, hybrid framing, schema validation, and a matching client. 139 tests passing. End-to-end demo script runs clean against a live server. Phase 2 has additively widened the public surface (schema instances exported, `LocalServer` + `send_request` promoted to `axiom_store.test_utils`). |
-| `axiom-queue` | Partial — data layer complete | `ids`, `jobs`, `handlers`, and `retry` modules implemented and tested. Worker loop, watchdog, and dispatcher not yet built. 71 tests passing across the layer. |
+| `axiom-queue` | Partial — runnable queue service complete | `ids`, `jobs`, `handlers`, `retry`, worker loop, watchdog, and dispatcher implemented and tested. Single dispatcher per vault enforced by pidfile. 145 tests passing across the layer. |
 | `axiom-fetch` | Stubbed | Package exists, no implementation |
 | `axiom-brain` | Stubbed | Package exists, no implementation |
 | `axiom-api` | Stubbed | Package exists, no implementation |
@@ -31,7 +31,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 **The live demo** (`scripts/demo_axiom_store.py`) walks the seven verbs and assertions against a running server: WRITE with schema validation, READ roundtrip, LIST, SCHEMA_ERROR rejection, path-traversal rejection (BAD_REQUEST), NOT_FOUND, DELETE, and read-after-delete. All pass.
 
-**`axiom-queue` data layer:** Job creation, frontmatter roundtrip, and storage through `StoreClient` all work end to end. A `create_pending_job("echo", payload={...})` call produces a valid `Job` in memory; `write_job` persists it as a schema-validated `.md` file in `mono-vault/jobs/`; `read_job` reads it back into an equal `Job` instance. Worker code that consumes these primitives is the next step.
+**`axiom-queue` runnable service:** Job creation, vault persistence, worker execution, retry transitions, watchdog reclaim, and dispatcher lifecycle now work against a live `axiom-store` server. A `create_pending_job("echo", payload={...})` call can be persisted through `write_job`; the dispatcher starts the worker/watchdog loops; the worker claims the job, executes the handler, and writes the `succeeded` result back into `mono-vault/jobs/<id>.md`.
 
 ### Components
 
@@ -52,6 +52,9 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **`axiom-queue/jobs.py`** — `Job` dataclass mirroring the JOB schema exactly. `__post_init__` validates against the schema via `validate(self.to_frontmatter(), JOB)` — you cannot construct an invalid `Job` in memory. `to_frontmatter()` omits `None`-valued optional fields entirely, keeping pending-job files minimal. `from_frontmatter(md)` is the reverse direction with an unknown-key check (defense in depth — the schema rejects on write, this rejects on read). `create_pending_job(kind, payload, max_attempts=3)` is the factory for new jobs. `write_job`, `read_job`, `list_jobs` are thin wrappers around `StoreClient` that route to `jobs/<id>.md`. Status vocabulary constants (`STATUS_PENDING`, `STATUS_RUNNING`, `STATUS_SUCCEEDED`, `STATUS_FAILED`, `STATUS_DEAD`) and `ALL_STATUSES` are module-level — the dataclass rejects any unknown status.
 - **`axiom-queue/handlers.py`** — Handler registry: `HANDLERS: dict[str, Handler]`. Two starter handlers shipped — `echo_handler(payload)` returns `{"echoed": payload["message"]}`, `noop_handler(payload)` returns `{"ok": True}`. `register(kind, handler)` adds, `unregister(kind)` removes, `dispatch(kind, payload)` looks up and runs. `UnknownJobKind` raised when no handler matches; `HandlerError` raised when a handler returns a non-dict (handler contract violation, distinct from a handler raising — those propagate so the worker can decide whether to retry). The registry is module-level mutable; tests use a snapshot/restore fixture to isolate.
 - **`axiom-queue/retry.py`** — Pure retry policy. `compute_backoff(attempts, base=1.0, cap=300.0, jitter=False, rng=None)` does exponential backoff with a 5-minute cap and optional ±25% jitter (rng injectable for deterministic tests). `RetryDecision` dataclass carries `next_status`, `next_attempt_at`, and `delay_seconds`. `decide_after_success()` returns the terminal succeeded decision. `decide_after_failure(attempts, max_attempts, jitter, rng)` returns either a `failed` decision with a future `next_attempt_at`, or a `dead` decision if `attempts >= max_attempts`. `is_ready_to_retry(next_attempt_at, now)` lexicographically compares the two ISO 8601 strings — works because all vault timestamps are fixed-width UTC with `Z` suffix; pinned with a regression test.
+- **`axiom-queue/worker.py`** — Worker loop. `scan_for_claimable_jobs` finds `pending` jobs and `failed` jobs whose `next_attempt_at` has passed. `claim` writes `running`, increments `attempts`, sets `worker_id`/`claimed_at`, and clears prior retry state. `execute` dispatches to the handler registry and classifies unknown kinds / handler contract violations as fatal. `resolve` writes `succeeded`, `failed`, or `dead` with result/error/retry metadata. `run_worker` polls until a shared `stop_event` is set and always finishes an in-flight job before exiting.
+- **`axiom-queue/watchdog.py`** — Stall reclaimer. Running jobs whose `claimed_at` is older than `STALL_THRESHOLD_SECONDS = 300.0` are reset to `pending`; `attempts` is preserved, claim metadata is cleared, and a reclaim note is appended to the job body for vault-level auditability. `run_watchdog` scans every `DEFAULT_SCAN_INTERVAL_SECONDS = 10.0` by default.
+- **`axiom-queue/dispatcher.py`** — Runnable queue service. Enforces one dispatcher per vault with a pidfile under `$XDG_CACHE_HOME/mono-axiom/axiom-queue.pid` (or `~/.cache/mono-axiom/axiom-queue.pid`), starts worker and watchdog loops, installs SIGINT/SIGTERM handlers in the CLI, and shuts down cleanly through a shared `threading.Event`. Runs as `python -m axiom_queue.dispatcher --host 127.0.0.1 --port 7070`; editable installs also expose `axiom-queue`.
 
 ### Surviving Phase 0 artifacts
 
@@ -114,19 +117,25 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `axiom-store/tests/test_client.py` — 11 tests (real server + real client + status translation; now uses `LocalServer` from `axiom_store.test_utils`)
 - **Total: 139 passing.** (Phase 1: 130 → 139 after JOB schema migration tests.)
 
-**`axiom-queue` package (data layer complete)**
+**`axiom-queue` package (runnable service complete)**
 
-- `axiom-queue/__init__.py` — re-exports `Job`, `JobValidationError`, `create_pending_job`, `list_jobs`, `read_job`, `write_job`, `HANDLERS`, `Handler`, `HandlerError`, `UnknownJobKind`, `dispatch`, `echo_handler`, `noop_handler`, `register`, `unregister`, `BASE_DELAY_SECONDS`, `JITTER_FRACTION`, `MAX_DELAY_SECONDS`, `RetryDecision`, `compute_backoff`, `decide_after_failure`, `decide_after_success`, `is_ready_to_retry`
+- `axiom-queue/__init__.py` — re-exports the public queue surface across jobs, handlers, retry, worker, watchdog, and dispatcher.
 - `axiom-queue/ids.py` — UUID4 + ISO 8601 helpers
 - `axiom-queue/jobs.py` — `Job` dataclass, frontmatter roundtrip, `StoreClient` I/O, `create_pending_job` factory
 - `axiom-queue/handlers.py` — registry + `echo` and `noop` starter handlers + `dispatch`
 - `axiom-queue/retry.py` — `compute_backoff`, `RetryDecision`, `decide_after_*`, `is_ready_to_retry`
+- `axiom-queue/worker.py` — scan/claim/execute/resolve loop
+- `axiom-queue/watchdog.py` — stalled-running-job detection and reclaim
+- `axiom-queue/dispatcher.py` — queue-service lifecycle, pidfile guard, CLI
 - `axiom-queue/tests/test_jobs.py` — 22 tests
 - `axiom-queue/tests/test_retry.py` — 29 tests
 - `axiom-queue/tests/test_handlers.py` — 20 tests
-- **Total: 71 passing.**
+- `axiom-queue/tests/test_worker.py` — 31 tests
+- `axiom-queue/tests/test_watchdog.py` — 32 tests
+- `axiom-queue/tests/test_dispatcher.py` — 10 tests
+- **Total: 145 passing.**
 
-**Repo-wide test count: 210 passing.**
+**Repo-wide test count: 284 passing.**
 
 **Decisions locked (Phase 1)**
 
@@ -160,6 +169,10 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **Handler registry is module-level mutable** so Phase 3+ layers can register their own kinds at import time. Tests use snapshot/restore fixtures to isolate.
 - **`UnknownJobKind` is a fatal failure for the job, not a retryable one** — a missing handler isn't transient (worker logic to be implemented in `worker.py`).
 - **Lexicographic timestamp comparison.** `is_ready_to_retry` compares ISO 8601 strings directly. Safe because the format is fixed-width UTC with `Z`. Regression-pinned.
+- **Worker claim increments attempts before execution.** If a worker crashes mid-handler, the vault already records that an attempt started; the watchdog does not grant a free retry.
+- **Fatal failures skip retry.** Unknown job kinds and handler contract violations go directly to `dead`; ordinary handler exceptions use the retry policy.
+- **Watchdog reclaim is `running -> pending`, not `failed`.** A stall is a worker-lifecycle problem, not downstream flakiness. `attempts` is preserved and claim metadata is cleared.
+- **Dispatcher concurrency boundary.** Phase 2 runs one dispatcher process per vault, with one worker loop and one watchdog loop. The pidfile prevents accidentally starting two queue services against the same vault. Multi-worker claiming is deferred until the store has an atomic claim primitive.
 - **Public surface widening in `axiom_store`:** schema instances (`JOB`, `FACT`, `SUMMARY`, `CONVERSATION`, `PERSONA`, `FETCH_SOURCE`, `FETCH_CHUNK`) re-exported. Sets the rule that schema instances are public for all consumers, not just `axiom-queue`.
 - **`LocalServer` and `send_request` promoted** from `axiom-store/tests/test_server.py` (where they were file-private) into `axiom_store.test_utils`. Public, importable, single source of truth for live-server tests across all layers.
 - **Rootless test layout adopted.** No `__init__.py` in `axiom-store/tests/` or `axiom-queue/tests/`. Avoids the `tests.*` namespace collision pytest creates when multiple package-shaped test directories exist in one repo. Phase 3, 4, 5 test directories also won't have `__init__.py`.
@@ -238,7 +251,7 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 
 ## Phase 2 progress
 
-**Status:** data layer complete. Worker loop, watchdog, and dispatcher not yet built.
+**Status:** runnable queue service complete. Final Phase 2 polish remains.
 
 **Concepts walked:**
 
@@ -253,6 +266,9 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 **Implementation done:**
 
 - `ids.py`, `jobs.py`, `handlers.py`, `retry.py` — full data layer.
+- `worker.py` — claim/execute/resolve loop with retry integration.
+- `watchdog.py` — stalled running-job reclaim.
+- `dispatcher.py` — pidfile-guarded service lifecycle and CLI entry point.
 - JOB schema migrated to the Phase 2 shape.
 - `axiom_store.test_utils` extracted and adopted by both Phase 1 and Phase 2 tests.
 
@@ -262,20 +278,19 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 - [x] Concept understood: IPC between main process and workers (vault-as-IPC, walked but not yet implemented)
 - [x] Concept understood: idempotency and why it matters for retries
 - [x] Implement job file creation in `mono-vault/jobs/` (via `create_pending_job` + `write_job`)
-
-**Checklist items still open:**
-
-- [ ] Implement worker process pool
-- [ ] Implement job pickup (worker reads pending job files)
-- [ ] Implement retry logic with exponential backoff (math implemented in `retry.py`; loop integration pending in `worker.py`)
-- [ ] Implement job status updates (written back to vault via `axiom-store`)
-- [ ] Milestone confirmed: submit a job, worker executes, result lands in vault
+- [x] Implement worker loop/service
+- [x] Implement job pickup (worker reads pending/ready failed job files)
+- [x] Implement retry logic with exponential backoff
+- [x] Implement job status updates (written back to vault via `axiom-store`)
+- [x] Implement watchdog reclaim for stalled running jobs
+- [x] Implement dispatcher CLI entry point and pidfile guard
+- [x] Milestone path confirmed in tests: submit a job, dispatcher/worker executes, result lands in vault
 
 ---
 
 ## What's documented but not yet implemented
 
-Everything in the PRD beyond `axiom-queue`'s data layer. Next implementation steps within Phase 2: `worker.py` (the loop), `watchdog.py` (stall reclaim), `dispatcher.py` (CLI entry point + multi-worker spawning).
+Everything in the PRD beyond `axiom-queue`'s runnable service. Remaining Phase 2 polish: optional human-facing queue demo script, docs sync into `mono-vault/system/`, and deciding whether to mark the Phase 2 PRD checklist complete despite intentionally deferring true multi-worker atomic claiming.
 
 ---
 

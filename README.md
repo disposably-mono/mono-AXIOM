@@ -22,7 +22,7 @@ See [`PRD.md`](./PRD.md) for the full architecture and [`Documentation.md`](./Do
 
 ## Project status
 
-**Phase 0 — Foundations.** Repo scaffolded; layer packages stubbed; vault skeleton committed. No layer is functionally implemented yet.
+**Phase 2 — `axiom-queue` in progress.** `axiom-store` is complete, and `axiom-queue` now has job persistence, handlers, retry policy, worker loop, watchdog, and a runnable dispatcher service. Later layers are still stubbed.
 
 ## Getting started
 
