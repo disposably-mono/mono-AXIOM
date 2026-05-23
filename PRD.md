@@ -4,7 +4,7 @@
 **Author:** Mono (Mikel Taopa)
 **Version:** 1.2
 **Status:** Active
-**Last Updated:** May 21, 2026
+**Last Updated:** May 23, 2026
 **Target Completion Window:** ~90 days (pre-ADMU, August 2026)
 
 ---
@@ -193,8 +193,8 @@ Rationale: Fits fully in 4GB VRAM with headroom for context. Supports tool calli
 |---|---|---|---|
 | 0. Foundations | 1–2 | Networking basics, socket programming, Markdown/YAML parsing, project scaffolding | Complete |
 | 1. `axiom-store` | 3–5 | Markdown-backed store with TCP interface and write-through cache | **Complete** |
-| 2. `axiom-queue` | 6–8 | Job system, workers, retries | Next |
-| 3. `axiom-fetch` | 9–11 | Retrieval and chunking pipeline | Pending |
+| 2. `axiom-queue` | 6–8 | Job system, workers, retries | **Complete** |
+| 3. `axiom-fetch` | 9–11 | Retrieval and chunking pipeline | In progress |
 | 4. `axiom-brain` | 12–15 | Provider abstraction, intent routing, tool-calling loop, memory commands | Pending |
 | 5. `axiom-api` | 16–18 | FastAPI gateway, web dashboard, streaming, settings UI, exports | Pending |
 
@@ -263,15 +263,22 @@ Phase 2 currently ships one pidfile-guarded dispatcher service with one worker l
 
 ### Phase 3 — `axiom-fetch`
 
-- [ ] Concept understood: HTTP request/response cycle
-- [ ] Concept understood: HTML parsing and content extraction
-- [ ] Concept understood: chunking strategies and overlap for RAG
-- [ ] Implement web fetch via `httpx`
-- [ ] Implement HTML → Markdown conversion
-- [ ] Implement PDF ingestion
-- [ ] Implement `.docx` ingestion
-- [ ] Implement chunker (configurable size + overlap)
-- [ ] Implement source and chunk persistence to vault
+- [x] Concept understood: HTTP request/response cycle
+- [x] Concept understood: HTML parsing and content extraction
+- [x] Concept understood: chunking strategies and overlap for RAG
+- [x] Concept understood: PDF text extraction limits (layout reconstruction, encrypted files, scanned PDFs)
+- [x] Concept understood: DOCX package extraction (paragraphs, tables, metadata)
+- [x] Implement web fetch via `httpx`
+- [x] Implement HTML → Markdown conversion
+- [x] Implement plain-text ingestion
+- [x] Implement PDF ingestion
+- [x] Implement `.docx` ingestion
+- [x] Implement chunker (configurable size + overlap)
+- [x] Implement source and chunk persistence to vault
+- [x] Implement fetch demo script
+- [ ] Implement public file/upload ingestion API (`ingest_file`)
+- [ ] Implement embeddings/retrieval search
+- [ ] Implement queue-handler integration
 - [ ] Milestone confirmed: URL or uploaded file produces retrievable chunks in vault
 
 ### Phase 4 — `axiom-brain`

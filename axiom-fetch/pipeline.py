@@ -18,7 +18,7 @@ The pipeline uses a two-phase write:
 
 The pipeline never raises on fetch/extract failures — every failure is
 recorded in the source's status and error fields. ValueError is reserved
-for programmer errors (bad argument types).
+for programmer errors at the public boundary (bad URL, bad chunk parameters).
 
 The pipeline never retries. Retries belong to axiom-queue; wrap ingest
 in a job to get retry semantics.
@@ -32,10 +32,11 @@ from axiom_fetch.chunker import (
     Chunk,
     chunk_text,
 )
-from axiom_fetch.extractor import UnsupportedContentType, extract
+from axiom_fetch.extractor import extract
 from axiom_fetch.fetcher import STATUS_FAILED, STATUS_SUCCEEDED, fetch
 from axiom_fetch.ids import chunk_id_for, new_source_id, now_iso
 from axiom_store.frontmatter import render_frontmatter
+from pypdf.errors import PdfReadError
 
 # Vault paths. Trailing slash matters — these are directory prefixes.
 SOURCES_DIR = "fetch/sources/"
@@ -108,7 +109,7 @@ def ingest(
     # Phase 3: extract
     try:
         extract_result = extract(fetch_result.body, fetch_result.content_type)
-    except UnsupportedContentType as exc:
+    except (ValueError, PdfReadError) as exc:
         _write_source(
             store=store,
             source_id=source_id,

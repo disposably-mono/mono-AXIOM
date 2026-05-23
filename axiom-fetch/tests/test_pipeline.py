@@ -9,6 +9,8 @@ vault and in what order, not the network behavior.
 
 from __future__ import annotations
 
+from io import BytesIO
+
 import pytest
 from axiom_fetch import pipeline as pipeline_module
 from axiom_fetch.fetcher import STATUS_FAILED, STATUS_SUCCEEDED, FetchResult
@@ -21,6 +23,9 @@ from axiom_fetch.pipeline import (
     ingest,
 )
 from axiom_store.frontmatter import parse_frontmatter
+from docx import Document
+
+DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 # ---------------------------------------------------------------------------
 # Fake store — minimal substitute for StoreClient / CachedVaultStore
@@ -64,6 +69,16 @@ def parse_chunk_at(store: FakeStore, source_id: str, index: int) -> tuple[dict, 
     path = f"{CHUNKS_DIR}{chunk_id}.md"
     raw = store.read(path).decode("utf-8")
     return parse_frontmatter(raw)
+
+
+def make_docx_body(title: str, paragraph: str) -> bytes:
+    """Build a tiny DOCX document for pipeline tests."""
+    document = Document()
+    document.core_properties.title = title
+    document.add_paragraph(paragraph)
+    out = BytesIO()
+    document.save(out)
+    return out.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -346,37 +361,73 @@ class TestExtractFailure:
     def test_unsupported_content_type_writes_failed_source(self, patch_fetch):
         patch_fetch(
             FetchResult(
-                url="https://example.com/file.pdf",
+                url="https://example.com/file.bin",
                 status=STATUS_SUCCEEDED,
                 http_status=200,
-                content_type="application/pdf",
-                body=b"%PDF-1.4 fake pdf body",
+                content_type="application/octet-stream",
+                body=b"opaque bytes",
                 error=None,
             )
         )
         store = FakeStore()
-        source_id = ingest("https://example.com/file.pdf", store)
+        source_id = ingest("https://example.com/file.bin", store)
 
         meta = parse_source_at(store, source_id)
         assert meta["status"] == STATUS_FAILED
-        assert "application/pdf" in meta["error"]
+        assert "application/octet-stream" in meta["error"]
 
     def test_unsupported_content_type_writes_no_chunks(self, patch_fetch):
         patch_fetch(
             FetchResult(
-                url="https://example.com/file.pdf",
+                url="https://example.com/file.bin",
                 status=STATUS_SUCCEEDED,
                 http_status=200,
-                content_type="application/pdf",
-                body=b"%PDF-1.4",
+                content_type="application/octet-stream",
+                body=b"opaque bytes",
                 error=None,
             )
         )
         store = FakeStore()
-        ingest("https://example.com/file.pdf", store)
+        ingest("https://example.com/file.bin", store)
 
         chunk_writes = [p for (p, _) in store.writes if p.startswith(CHUNKS_DIR)]
         assert chunk_writes == []
+
+    def test_unreadable_pdf_writes_failed_source(self, patch_fetch):
+        patch_fetch(
+            FetchResult(
+                url="https://example.com/broken.pdf",
+                status=STATUS_SUCCEEDED,
+                http_status=200,
+                content_type="application/pdf",
+                body=b"%PDF-1.4 broken",
+                error=None,
+            )
+        )
+        store = FakeStore()
+        source_id = ingest("https://example.com/broken.pdf", store)
+
+        meta = parse_source_at(store, source_id)
+        assert meta["status"] == STATUS_FAILED
+        assert meta["error"]
+
+    def test_unreadable_docx_writes_failed_source(self, patch_fetch):
+        patch_fetch(
+            FetchResult(
+                url="https://example.com/broken.docx",
+                status=STATUS_SUCCEEDED,
+                http_status=200,
+                content_type=DOCX_CONTENT_TYPE,
+                body=b"not a docx",
+                error=None,
+            )
+        )
+        store = FakeStore()
+        source_id = ingest("https://example.com/broken.docx", store)
+
+        meta = parse_source_at(store, source_id)
+        assert meta["status"] == STATUS_FAILED
+        assert "invalid DOCX" in meta["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +471,35 @@ class TestPlainTextIngest:
 
         meta = parse_source_at(store, source_id)
         assert meta["chunk_count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# DOCX content
+# ---------------------------------------------------------------------------
+
+
+class TestDocxIngest:
+    def test_docx_succeeds(self, patch_fetch):
+        patch_fetch(
+            FetchResult(
+                url="https://example.com/report.docx",
+                status=STATUS_SUCCEEDED,
+                http_status=200,
+                content_type=DOCX_CONTENT_TYPE,
+                body=make_docx_body("Quarterly Report", "DOCX body text for the vault."),
+                error=None,
+            )
+        )
+        store = FakeStore()
+        source_id = ingest("https://example.com/report.docx", store)
+
+        meta = parse_source_at(store, source_id)
+        assert meta["status"] == STATUS_SUCCEEDED
+        assert meta["title"] == "Quarterly Report"
+        assert meta["chunk_count"] == 1
+
+        _, chunk_body = parse_chunk_at(store, source_id, 0)
+        assert "DOCX body text for the vault." in chunk_body
 
 
 # ---------------------------------------------------------------------------

@@ -8,8 +8,8 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 ## Current state
 
-**Phase:** 3 — `axiom-fetch`: in progress (URL ingestion MVP functional)
-**Active work:** Decide whether Phase 3 next grows upload/PDF/DOCX support, a queue handler wrapper, or retrieval-facing search/index plumbing.
+**Phase:** 3 — `axiom-fetch`: in progress (URL ingestion for HTML/TXT/PDF/DOCX functional)
+**Active work:** Add the public file-ingestion API (`ingest_file`) and decide whether Phase 3 next grows queue-handler integration or retrieval-facing search/index plumbing.
 
 ---
 
@@ -17,9 +17,9 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 | Layer | Status | Notes |
 |---|---|---|
-| `axiom-store` | Complete | TCP-accessible Markdown store with write-through cache, hybrid framing, schema validation, and a matching client. 155 tests passing. End-to-end demo script runs clean against a live server. Phase 2/3 have additively widened the public surface and migrated JOB/FETCH schemas to their real shapes. |
+| `axiom-store` | Complete | TCP-accessible Markdown store with write-through cache, hybrid framing, schema validation, and a matching client. 154 tests passing. End-to-end demo script runs clean against a live server. Phase 2/3 have additively widened the public surface and migrated JOB/FETCH schemas to their real shapes. |
 | `axiom-queue` | Runnable service complete | `ids`, `jobs`, `handlers`, `retry`, worker loop, watchdog, dispatcher, and queue demo implemented and tested. Single dispatcher per vault enforced by pidfile. 146 tests passing across the layer. True multi-worker pooling remains deferred until the store has an atomic claim primitive. |
-| `axiom-fetch` | Partial — URL ingestion MVP complete | HTTP fetcher, HTML/plain-text extractor, fixed-size overlapping chunker, ID helpers, and vault-writing ingestion pipeline implemented. 119 tests passing. Uploads, PDF/DOCX extraction, embeddings, and retrieval/search remain deferred. |
+| `axiom-fetch` | Partial — URL ingestion for supported document types complete | HTTP fetcher, HTML/plain-text/PDF/DOCX extractors, fixed-size overlapping chunker, ID helpers, vault-writing ingestion pipeline, and fetch demo implemented. 139 tests passing. Public file/upload ingestion, embeddings, and retrieval/search remain deferred. |
 | `axiom-brain` | Stubbed | Package exists, no implementation |
 | `axiom-api` | Stubbed | Package exists, no implementation |
 
@@ -35,7 +35,9 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 **The queue demo** (`scripts/demo_axiom_queue.py`) submits an `echo` job through the TCP store, waits for the dispatcher/worker to resolve it, then prints the absolute job file path under `/home/mono/Projects/mono-axiom/mono-vault/jobs/`. This pins the intended local repo root and prevents accidental writes to similarly named lowercase paths.
 
-**`axiom-fetch` URL ingestion path:** `ingest(url, store)` writes a pending `fetch/sources/<source_id>.md`, fetches the URL over HTTP, extracts HTML or plain text into Markdown, slices it into overlapping chunks, writes `fetch/chunks/<source_id>-NNNN.md`, then updates the source to `succeeded` or `failed`. Fetch and extraction failures are recorded in vault metadata instead of bubbling as runtime errors; programmer errors still raise `ValueError`. The pipeline is tested with deterministic fake fetches and an in-memory store, so no test reaches the public internet.
+**`axiom-fetch` URL ingestion path:** `ingest(url, store)` writes a pending `fetch/sources/<source_id>.md`, fetches the URL over HTTP, extracts HTML, plain text, PDF, or DOCX into Markdown-ish text, slices it into overlapping chunks, writes `fetch/chunks/<source_id>-NNNN.md`, then updates the source to `succeeded` or `failed`. Fetch and extraction failures are recorded in vault metadata instead of bubbling as runtime errors; programmer errors still raise `ValueError`. The pipeline is tested with deterministic fake fetches and an in-memory store, so no test reaches the public internet.
+
+**The fetch demo** (`scripts/demo_axiom_fetch.py`) starts a tiny local HTTP server, serves generated HTML/TXT/PDF/DOCX documents, ingests each through the real pipeline and TCP store, asserts success, and prints the source/chunk vault paths for inspection. It supports `--host`, `--port`, and `--vault` for custom local runs.
 
 ### Components
 
@@ -64,7 +66,9 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 - **`axiom-fetch/ids.py`** — `new_source_id()` returns `src-<12 hex chars>`, `chunk_id_for(source_id, index)` returns deterministic chunk IDs like `src-abc123def456-0007`, and `now_iso()` matches the vault-wide UTC `YYYY-MM-DDTHH:MM:SSZ` timestamp convention.
 - **`axiom-fetch/fetcher.py`** — Network boundary for the layer. `fetch(url, timeout=30.0, max_bytes=20 MB, client=None)` uses `httpx`, follows redirects, sends the project user agent, and returns a `FetchResult`. Network, timeout, HTTP 4xx/5xx, and size-cap failures become `status="failed"` results; only programmer errors raise.
-- **`axiom-fetch/extractor.py`** — Pure extraction boundary. Supports `text/html` via BeautifulSoup + markdownify and `text/plain` as decoded Markdown passthrough. HTML extraction strips chrome tags (`script`, `style`, `nav`, `header`, `footer`, `aside`, `noscript`), chooses main content by `<main>`, `<article>`, `[role=main]`, `<body>`, then normalizes whitespace. PDF and DOCX intentionally raise `UnsupportedContentType` for now.
+- **`axiom-fetch/extractor.py`** — Pure extraction dispatcher. Supports `text/html` via BeautifulSoup + markdownify, `text/plain` as decoded Markdown passthrough, `application/pdf` via `pdf_extractor.py`, and DOCX via `docx_extractor.py`. HTML extraction strips chrome tags (`script`, `style`, `nav`, `header`, `footer`, `aside`, `noscript`), chooses main content by `<main>`, `<article>`, `[role=main]`, `<body>`, then normalizes whitespace.
+- **`axiom-fetch/pdf_extractor.py`** — PDF bytes to Markdown-ish text via `pypdf`. Extracts metadata title when available, reads page text page-by-page, joins page boundaries with blank lines, rejects encrypted PDFs, and raises a clear empty-extraction error when no extractable text is present.
+- **`axiom-fetch/docx_extractor.py`** — DOCX bytes to Markdown-ish text via `python-docx`. Extracts core-properties title, walks paragraphs and tables in document order, maps Heading 1-6 to Markdown headings, preserves basic list styles, emits tables as GitHub-flavored Markdown tables, and raises clear errors for invalid or empty DOCX files.
 - **`axiom-fetch/chunker.py`** — Pure fixed-character chunker. Defaults: `DEFAULT_CHUNK_SIZE = 2000`, `DEFAULT_OVERLAP = 200`, soft-boundary lookback of 50 characters. Returns frozen `Chunk` records with `text`, `index`, `char_count`, and `overlap_chars`. Token-aware chunking is deferred until provider/model choices in later phases need it.
 - **`axiom-fetch/pipeline.py`** — `ingest(url, store, chunk_size=..., overlap=...)` composes fetch, extract, chunk, and vault writes. Source files live under `fetch/sources/`, chunk files under `fetch/chunks/`. It writes the source before work starts (`pending`) so interrupted ingests leave visible intent in the vault; terminal source metadata records `succeeded`/`failed`, content type, title, chunk count, fetched timestamp, or error.
 
@@ -85,7 +89,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 **Scaffold (committed and pushed)**
 
 - Five layer packages — `axiom-store`, `axiom-queue`, `axiom-fetch`, `axiom-brain`, `axiom-api` — each with `__init__.py` and `README.md` (the first three now have real implementation surfaces)
-- `pyproject.toml` — workspace config, hyphen filesystem names mapped to underscore Python import names via explicit `[tool.setuptools] packages` + `package-dir` (auto-discovery via `find` does not work with the flat per-layer layout). Runtime deps: `PyYAML>=6.0`, `httpx>=0.27`, `beautifulsoup4>=4.12`, `markdownify>=0.11`. `testpaths` enumerates per-layer `tests/` directories.
+- `pyproject.toml` — workspace config, hyphen filesystem names mapped to underscore Python import names via explicit `[tool.setuptools] packages` + `package-dir` (auto-discovery via `find` does not work with the flat per-layer layout). Runtime deps: `PyYAML>=6.0`, `httpx>=0.27`, `beautifulsoup4>=4.12`, `markdownify>=0.11`, `pypdf>=4.0`, `python-docx>=1.1`. `testpaths` enumerates per-layer `tests/` directories.
 - `.gitignore` — covers Python, secrets (`mono-vault/`, `.env`), editor and OS artifacts
 - `.env.example` — placeholders for `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`, `OLLAMA_MODEL`, `VAULT_PATH`, `STORE_PORT`, `API_PORT`. The example `VAULT_PATH` is anchored to `/home/mono/Projects/mono-axiom/mono-vault`.
 - `LICENSE` — Apache 2.0
@@ -93,6 +97,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `scripts/bootstrap_vault.py` — idempotent, copies `mono-vault.example/` to real vault location
 - `scripts/demo_axiom_store.py` — end-to-end store demo against a live server
 - `scripts/demo_axiom_queue.py` — end-to-end queue demo against a live store server and running dispatcher
+- `scripts/demo_axiom_fetch.py` — end-to-end fetch demo against a live store server, using a local HTTP server for generated HTML/TXT/PDF/DOCX documents
 
 **Vault skeleton (`mono-vault.example/`, committed)**
 
@@ -123,12 +128,12 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `axiom-store/tests/test_frontmatter.py` — 18 tests
 - `axiom-store/tests/test_filesystem.py` — 29 tests
 - `axiom-store/tests/test_cache.py` — 16 tests
-- `axiom-store/tests/test_schema.py` — 37 tests (12 original + 9 JOB tests pinning the Phase 2 shape + 16 FETCH schema tests pinning the Phase 3 shape and old-shape rejection)
+- `axiom-store/tests/test_schema.py` — 36 tests pinning the base schemas plus the Phase 2 JOB shape and Phase 3 FETCH_SOURCE/FETCH_CHUNK shapes.
 - `axiom-store/tests/test_protocol.py` — 17 tests
 - `axiom-store/tests/test_dispatch.py` — 13 tests (pure dispatch, in-memory)
 - `axiom-store/tests/test_server.py` — 8 tests (real TCP, real socket, real round trip; now uses `LocalServer` from `axiom_store.test_utils`)
 - `axiom-store/tests/test_client.py` — 11 tests (real server + real client + status translation; now uses `LocalServer` from `axiom_store.test_utils`)
-- **Total: 155 passing.** (Phase 1: 130 → 139 after JOB schema migration tests → 155 after FETCH_SOURCE/FETCH_CHUNK migration tests.)
+- **Total: 154 passing.** (Phase 1: 130 → 138 after JOB schema migration tests → 154 after FETCH_SOURCE/FETCH_CHUNK migration tests.)
 
 **`axiom-queue` package (runnable service complete)**
 
@@ -148,22 +153,26 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `axiom-queue/tests/test_dispatcher.py` — 10 tests
 - **Total: 146 passing.**
 
-**`axiom-fetch` package (URL ingestion MVP complete)**
+**`axiom-fetch` package (URL ingestion for supported document types complete)**
 
 - `axiom-fetch/__init__.py` — re-exports the public fetcher, extractor, chunker, ID, and pipeline surface.
 - `axiom-fetch/ids.py` — source IDs, chunk IDs, UTC timestamps.
 - `axiom-fetch/fetcher.py` — HTTP GET via `httpx`, redirect-aware, failure-as-data, response size cap.
-- `axiom-fetch/extractor.py` — HTML/plain-text to Markdown extraction.
+- `axiom-fetch/extractor.py` — dispatches HTML/plain-text/PDF/DOCX extraction.
+- `axiom-fetch/pdf_extractor.py` — PDF text/title extraction via `pypdf`.
+- `axiom-fetch/docx_extractor.py` — DOCX paragraph/table/title extraction via `python-docx`.
 - `axiom-fetch/chunker.py` — overlapping fixed-character chunks with soft boundary handling.
 - `axiom-fetch/pipeline.py` — `ingest()` orchestration and vault persistence to `fetch/sources/` and `fetch/chunks/`.
 - `axiom-fetch/tests/test_ids.py`
 - `axiom-fetch/tests/test_fetcher.py`
 - `axiom-fetch/tests/test_extractor.py`
+- `axiom-fetch/tests/test_pdf_extractor.py`
+- `axiom-fetch/tests/test_docx_extractor.py`
 - `axiom-fetch/tests/test_chunker.py`
 - `axiom-fetch/tests/test_pipeline.py`
-- **Total: 119 passing.**
+- **Total: 139 passing.**
 
-**Repo-wide test count: 420 passing.**
+**Repo-wide test count: 439 passing.**
 
 **Decisions locked (Phase 1)**
 
@@ -206,7 +215,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **`LocalServer` and `send_request` promoted** from `axiom-store/tests/test_server.py` (where they were file-private) into `axiom_store.test_utils`. Public, importable, single source of truth for live-server tests across all layers.
 - **Rootless test layout adopted.** No `__init__.py` in `axiom-store/tests/` or `axiom-queue/tests/`. Avoids the `tests.*` namespace collision pytest creates when multiple package-shaped test directories exist in one repo. Phase 3, 4, 5 test directories also won't have `__init__.py`.
 
-**Decisions locked (Phase 3 — fetch ingestion MVP)**
+**Decisions locked (Phase 3 — fetch ingestion)**
 
 - **FETCH_SOURCE schema:** required keys are `id`, `type`, `status`, `url`, `created_at`, `updated_at`. Optional keys are `fetched_at`, `content_type`, `title`, `error`, `chunk_count`, `tags`. The old placeholder shape (`type`, `url`, `fetched_at`) is rejected.
 - **FETCH_CHUNK schema:** required keys are `id`, `type`, `source_id`, `chunk_index`, `chunk_total`, `created_at`, `char_count`. Optional keys are `overlap_chars`, `tags`. The old `source` field and `embedding_path` are rejected; embedding metadata belongs to later retrieval/index work.
@@ -214,8 +223,10 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **Chunk ID shape:** `<source_id>-<index:04d>`. Chunk IDs are deterministic and naturally filename-sortable.
 - **HTTP boundary:** `fetcher.py` is the only module that performs network I/O. Tests inject `httpx.MockTransport` or monkeypatch the pipeline fetch call; no unit test calls the public internet.
 - **Failure model:** fetch and extraction failures are persisted as failed source metadata, not raised through `ingest()`. Programmer errors (`bad URL`, invalid chunk parameters, invalid body type) still raise.
-- **Supported extraction formats:** HTML and plain text only. PDF and DOCX remain deferred even though the PRD calls for them in Phase 3.
+- **Supported URL extraction formats:** HTML, plain text, PDF, and DOCX. Public file/upload ingestion remains deferred even though the extractors are now available behind URL ingestion.
 - **HTML extraction heuristic:** strip chrome tags everywhere, then select main content by `<main>`, `<article>`, `[role=main]`, `<body>`, then whole document fallback.
+- **PDF extraction policy:** use `pypdf` page text extraction and metadata title only. Encrypted PDFs fail clearly. PDFs with no extractable text fail clearly rather than writing succeeded sources with zero chunks; OCR is deferred.
+- **DOCX extraction policy:** use `python-docx` to walk body paragraphs and tables in document order. Core-properties title is the only title source. Headings and simple list styles are converted to Markdown; tables become Markdown tables.
 - **Chunking unit:** characters, not tokens. Defaults are 2000 characters with 200-character overlap. Token-aware chunking is deferred until provider-specific retrieval quality requires it.
 - **Two-phase source write:** `ingest()` writes a pending source before fetching and overwrites it with terminal `succeeded`/`failed` metadata later. A crash mid-ingest leaves visible intent in the vault.
 
@@ -334,13 +345,15 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 
 ## Phase 3 progress
 
-**Status:** URL ingestion MVP complete; broader retrieval layer still in progress.
+**Status:** URL ingestion for HTML/TXT/PDF/DOCX complete; broader retrieval layer still in progress.
 
 **Concepts walked:**
 
 - **Failure as vault state.** Fetch and extractor failures are recorded in `FETCH_SOURCE` frontmatter so operators can inspect what happened without searching logs.
 - **Network boundary discipline.** `fetcher.py` owns HTTP and returns structured results; extractor/chunker/pipeline logic is deterministic and testable without network access.
 - **Main-content extraction.** HTML conversion now strips site chrome, picks the most semantically meaningful content element available, and converts to Markdown with a small dependency rather than handwritten HTML parsing.
+- **PDF extraction limits.** PDFs are layout programs, not semantic text documents; `pypdf` reconstructs text from page drawing instructions. Encrypted PDFs, scanned PDFs, and empty extractions are surfaced as failed source states rather than pretending the ingest succeeded.
+- **DOCX package extraction.** DOCX files are ZIP packages containing WordprocessingML. `python-docx` gives a structured view of document body blocks, so paragraphs and tables can be walked in order and converted to Markdown-ish text.
 - **Character chunking tradeoff.** Characters are deterministic and provider-independent; token-aware chunking remains a quality upgrade for later.
 - **Two-phase ingest.** Pending source write first, terminal update last, so interrupted work leaves an auditable marker in the vault.
 
@@ -348,24 +361,30 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 
 - `ids.py` — source/chunk ID and timestamp helpers.
 - `fetcher.py` — HTTP GET with redirect support, user agent, timeout, size cap, and failure-as-data result shape.
-- `extractor.py` — HTML and plain-text extraction to Markdown.
+- `extractor.py` — dispatches supported content types to specialized extractors.
+- `pdf_extractor.py` — PDF text/title extraction via `pypdf`.
+- `docx_extractor.py` — DOCX paragraph/table/title extraction via `python-docx`.
 - `chunker.py` — overlapping character chunking with soft boundary handling.
 - `pipeline.py` — `ingest()` writes source and chunk Markdown files through an injected store.
+- `scripts/demo_axiom_fetch.py` — live demo serving generated HTML/TXT/PDF/DOCX locally and ingesting them through a running `axiom-store`.
 - FETCH schemas migrated in `axiom-store/schema.py`.
-- Phase 3 tests added for schema, IDs, fetcher, extractor, chunker, and pipeline.
+- Phase 3 tests added for schema, IDs, fetcher, extractor, PDF/DOCX extractors, chunker, and pipeline.
 
 **Checklist items unblocked:**
 
 - [x] Implement HTTP fetch boundary
 - [x] Implement HTML extraction to Markdown
 - [x] Implement plain-text extraction
+- [x] Implement PDF extraction
+- [x] Implement DOCX extraction
 - [x] Implement chunking with overlap
 - [x] Implement source and chunk persistence to vault
+- [x] Implement human-facing fetch demo script
 - [x] Milestone path confirmed in tests: URL ingestion produces source and chunk files in the vault
 
 ## What's documented but not yet implemented
 
-Everything in the PRD beyond the current URL-ingestion slice of `axiom-fetch`: uploads, PDF/DOCX extraction, retrieval search/indexing, embeddings, `axiom-brain`, and `axiom-api`.
+Everything in the PRD beyond the current URL-ingestion slice of `axiom-fetch`: public file/upload ingestion, retrieval search/indexing, embeddings, queue-handler integration, `axiom-brain`, and `axiom-api`.
 
 ---
 

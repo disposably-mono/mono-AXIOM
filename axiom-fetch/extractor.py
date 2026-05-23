@@ -6,10 +6,8 @@ for chunking. Dispatches by content type to specialized extractors:
 
   text/html      → BeautifulSoup tree, main-content heuristic, markdownify
   text/plain     → passthrough (decoded as text)
-
-Phase 3 follow-ups will add application/pdf and .docx extractors. They
-plug into the dispatcher in extract() without changing this module's
-public surface.
+  application/pdf → pypdf page text extraction
+  .docx          → python-docx paragraph/table extraction
 
 This module is pure-function: no I/O, no network, no vault. Bytes in,
 ExtractResult out.
@@ -92,6 +90,14 @@ def extract(body: bytes, content_type: str | None) -> ExtractResult:
         return _extract_html(body)
     if "text/plain" in ct:
         return _extract_plain(body)
+    if "application/pdf" in ct:
+        from axiom_fetch.pdf_extractor import extract_pdf
+
+        return extract_pdf(body)
+    if "wordprocessingml.document" in ct:
+        from axiom_fetch.docx_extractor import extract_docx
+
+        return extract_docx(body)
 
     raise UnsupportedContentType(f"no extractor for content_type={content_type!r}")
 

@@ -48,8 +48,8 @@ class TestDispatch:
         assert result.markdown == "hello world"
 
     def test_unknown_content_type_raises(self):
-        with pytest.raises(UnsupportedContentType, match="application/pdf"):
-            extract(b"%PDF-1.4...", "application/pdf")
+        with pytest.raises(UnsupportedContentType, match="application/octet-stream"):
+            extract(b"opaque bytes", "application/octet-stream")
 
     def test_none_content_type_raises(self):
         with pytest.raises(UnsupportedContentType, match="None"):

@@ -13,12 +13,15 @@ Web retrieval, document ingestion, and RAG chunking. Pulls content from URLs and
 
 ## Status
 
-Phase 3 in progress. The URL-ingestion MVP is implemented and tested:
+Phase 3 in progress. URL ingestion for supported document types is implemented and tested:
 
 - HTTP fetch with redirect support, timeout handling, user agent, and response size cap
 - HTML extraction via BeautifulSoup + markdownify
 - Plain-text extraction
+- PDF extraction via pypdf
+- DOCX extraction via python-docx
 - Fixed-character chunking with overlap and soft boundary handling
 - `ingest(url, store)` pipeline that writes `fetch/sources/<source_id>.md` and `fetch/chunks/<source_id>-NNNN.md`
+- `scripts/demo_axiom_fetch.py` end-to-end demo for HTML/TXT/PDF/DOCX ingestion
 
-Still deferred: uploads, PDF/DOCX extraction, embeddings, retrieval/search, and queue-handler integration.
+Still deferred: public file/upload ingestion, embeddings, retrieval/search, and queue-handler integration.
