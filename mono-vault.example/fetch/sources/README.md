@@ -6,10 +6,17 @@ Metadata for every URL fetched or document ingested. Original content
 Frontmatter schema:
 ```yaml
 ---
-source_id: <uuid>
-kind: url | upload
-location: <url or original filename>
-fetched_at: 2026-05-20T14:30:00Z
-chunk_ids: [<uuid>, <uuid>, ...]
+id: src-abc123def456
+type: fetch_source
+status: pending | succeeded | failed
+url: https://example.com/article
+created_at: 2026-05-23T10:00:00Z
+updated_at: 2026-05-23T10:00:05Z
+fetched_at: 2026-05-23T10:00:05Z   # optional, succeeded sources
+content_type: text/html             # optional
+title: Example Article              # optional
+error: HTTP 404                     # optional, failed sources
+chunk_count: 12                     # optional, succeeded sources
+tags: [research]                    # optional
 ---
 ```

@@ -8,8 +8,8 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 ## Current state
 
-**Phase:** 2 — `axiom-queue`: in progress (dispatcher + demo path complete)
-**Active work:** Decide whether Phase 2 closes with the single-worker dispatcher or waits for a true multi-worker process pool.
+**Phase:** 3 — `axiom-fetch`: in progress (URL ingestion MVP functional)
+**Active work:** Decide whether Phase 3 next grows upload/PDF/DOCX support, a queue handler wrapper, or retrieval-facing search/index plumbing.
 
 ---
 
@@ -17,9 +17,9 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 | Layer | Status | Notes |
 |---|---|---|
-| `axiom-store` | Complete | TCP-accessible Markdown store with write-through cache, hybrid framing, schema validation, and a matching client. 139 tests passing. End-to-end demo script runs clean against a live server. Phase 2 has additively widened the public surface (schema instances exported, `LocalServer` + `send_request` promoted to `axiom_store.test_utils`). |
-| `axiom-queue` | Partial — runnable queue service complete | `ids`, `jobs`, `handlers`, `retry`, worker loop, watchdog, dispatcher, and queue demo implemented and tested. Single dispatcher per vault enforced by pidfile. 146 tests passing across the layer. |
-| `axiom-fetch` | Stubbed | Package exists, no implementation |
+| `axiom-store` | Complete | TCP-accessible Markdown store with write-through cache, hybrid framing, schema validation, and a matching client. 155 tests passing. End-to-end demo script runs clean against a live server. Phase 2/3 have additively widened the public surface and migrated JOB/FETCH schemas to their real shapes. |
+| `axiom-queue` | Runnable service complete | `ids`, `jobs`, `handlers`, `retry`, worker loop, watchdog, dispatcher, and queue demo implemented and tested. Single dispatcher per vault enforced by pidfile. 146 tests passing across the layer. True multi-worker pooling remains deferred until the store has an atomic claim primitive. |
+| `axiom-fetch` | Partial — URL ingestion MVP complete | HTTP fetcher, HTML/plain-text extractor, fixed-size overlapping chunker, ID helpers, and vault-writing ingestion pipeline implemented. 119 tests passing. Uploads, PDF/DOCX extraction, embeddings, and retrieval/search remain deferred. |
 | `axiom-brain` | Stubbed | Package exists, no implementation |
 | `axiom-api` | Stubbed | Package exists, no implementation |
 
@@ -35,6 +35,8 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 **The queue demo** (`scripts/demo_axiom_queue.py`) submits an `echo` job through the TCP store, waits for the dispatcher/worker to resolve it, then prints the absolute job file path under `/home/mono/Projects/mono-axiom/mono-vault/jobs/`. This pins the intended local repo root and prevents accidental writes to similarly named lowercase paths.
 
+**`axiom-fetch` URL ingestion path:** `ingest(url, store)` writes a pending `fetch/sources/<source_id>.md`, fetches the URL over HTTP, extracts HTML or plain text into Markdown, slices it into overlapping chunks, writes `fetch/chunks/<source_id>-NNNN.md`, then updates the source to `succeeded` or `failed`. Fetch and extraction failures are recorded in vault metadata instead of bubbling as runtime errors; programmer errors still raise `ValueError`. The pipeline is tested with deterministic fake fetches and an in-memory store, so no test reaches the public internet.
+
 ### Components
 
 #### axiom-store
@@ -42,7 +44,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **`axiom-store/frontmatter.py`** — `parse_frontmatter(text) -> (dict, str)` and `render_frontmatter(metadata, body) -> str`. Pure string transforms. `FrontmatterError` (subclass of `ValueError`) on malformed YAML, unclosed fences, or non-mapping YAML. Roundtrip property `parse(render(m, b)) == (m, b)` holds for all tested cases.
 - **`axiom-store/filesystem.py`** — `VaultFS` class wrapping a configured vault root. `read`, `write`, `delete`, `list_dir`. Vault-relative paths only; `_resolve` rejects empty/absolute/null-byte/backslash/non-string paths and any path resolving outside the root via `Path.resolve()` + `is_relative_to(root)`. Writes auto-create parent directories. `list_dir` returns sorted filenames, files only. Direct `write_bytes` (atomic-rename deferred per single-writer assumption).
 - **`axiom-store/cache.py`** — `CachedVaultStore` wraps a `VaultFS` with `dict[str, bytes]`. Read hit returns from memory; miss reads from disk and populates. Write goes to disk first, then updates the cache. Delete evicts. `list_dir` passes through (not cached). Observable hit/miss counters via `store.stats`. Out-of-band edits not detected (documented Phase 1 limitation, regression-pinned).
-- **`axiom-store/schema.py`** — Per-content-type schemas (`FACT`, `SUMMARY`, `CONVERSATION`, `PERSONA`, `JOB`, `FETCH_SOURCE`, `FETCH_CHUNK`) with required/optional keys typed by Python `type`. Longest-prefix registry lookup via `schema_for(vault_path)`. `validate(metadata, schema)` raises `SchemaError` on missing required keys, type mismatches, or unknown keys (unless `allow_extra=True`). Free-form areas (`system/`, `exports/`, `fetch/uploads/`) deliberately have no schema and pass through unvalidated. **JOB schema rewritten for Phase 2** — see "Phase 2 progress" below.
+- **`axiom-store/schema.py`** — Per-content-type schemas (`FACT`, `SUMMARY`, `CONVERSATION`, `PERSONA`, `JOB`, `FETCH_SOURCE`, `FETCH_CHUNK`) with required/optional keys typed by Python `type`. Longest-prefix registry lookup via `schema_for(vault_path)`. `validate(metadata, schema)` raises `SchemaError` on missing required keys, type mismatches, or unknown keys (unless `allow_extra=True`). Free-form areas (`system/`, `exports/`, `fetch/uploads/`) deliberately have no schema and pass through unvalidated. **JOB schema rewritten for Phase 2; FETCH_SOURCE/FETCH_CHUNK schemas rewritten for Phase 3** — see progress sections below.
 - **`axiom-store/protocol.py`** — Hybrid framing on the wire: `\n`-delimited header lines, blank line, length-prefixed body. Pure-function parsers and formatters: `parse_request_headers`, `parse_response_headers`, `format_request`, `format_response`. Headers are case-sensitive lowercase. `content-length: <n>` is required. `MAX_BODY_BYTES = 10 MB` cap.
 - **`axiom-store/server.py`** — `serve_forever(vault_root, host, port)` runs the accept loop. Single-threaded, sequential, one-shot connections. `SO_REUSEADDR` for clean restarts. `recv_until` returns `(before, after)` from header reads so any body bytes coalesced into the same `recv` get prepended to the body read via `recv_exact(initial=after)` — this is the production fix for the framing problem we walked in concept and felt empirically in B2. Pure-function `dispatch(store, request) -> response` translates layer exceptions to protocol statuses (`InvalidVaultPath` → `BAD_REQUEST`, `FileNotFoundError` → `NOT_FOUND`, `SchemaError`/`FrontmatterError` → `SCHEMA_ERROR`, everything else logged → `SERVER_ERROR`). Runs as `python -m axiom_store.server --vault <path>`.
 - **`axiom-store/client.py`** — `StoreClient(host, port, timeout)` mirrors `CachedVaultStore`'s interface: `read`, `write`, `delete`, `list_dir`. Connection-per-call (one-shot). Server statuses translate back into Python exceptions matching what the in-process store would raise: `NOT_FOUND` → `FileNotFoundError`, `BAD_REQUEST` → `InvalidVaultPath`, `SCHEMA_ERROR` → `SchemaError`, `SERVER_ERROR` → `StoreError`. **Substitutable** — anywhere a `CachedVaultStore` is acceptable, a `StoreClient` works as a drop-in.
@@ -57,6 +59,14 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **`axiom-queue/worker.py`** — Worker loop. `scan_for_claimable_jobs` finds `pending` jobs and `failed` jobs whose `next_attempt_at` has passed. `claim` writes `running`, increments `attempts`, sets `worker_id`/`claimed_at`, and clears prior retry state. `execute` dispatches to the handler registry and classifies unknown kinds / handler contract violations as fatal. `resolve` writes `succeeded`, `failed`, or `dead` with result/error/retry metadata. `run_worker` polls until a shared `stop_event` is set and always finishes an in-flight job before exiting.
 - **`axiom-queue/watchdog.py`** — Stall reclaimer. Running jobs whose `claimed_at` is older than `STALL_THRESHOLD_SECONDS = 300.0` are reset to `pending`; `attempts` is preserved, claim metadata is cleared, and a reclaim note is appended to the job body for vault-level auditability. `run_watchdog` scans every `DEFAULT_SCAN_INTERVAL_SECONDS = 10.0` by default.
 - **`axiom-queue/dispatcher.py`** — Runnable queue service. Enforces one dispatcher per vault with a pidfile under `$XDG_CACHE_HOME/mono-axiom/axiom-queue.pid` (or `~/.cache/mono-axiom/axiom-queue.pid`), starts worker and watchdog loops, installs SIGINT/SIGTERM handlers in the CLI, and shuts down cleanly through a shared `threading.Event`. Runs as `python -m axiom_queue.dispatcher --host 127.0.0.1 --port 7070`; editable installs also expose `axiom-queue`.
+
+#### axiom-fetch
+
+- **`axiom-fetch/ids.py`** — `new_source_id()` returns `src-<12 hex chars>`, `chunk_id_for(source_id, index)` returns deterministic chunk IDs like `src-abc123def456-0007`, and `now_iso()` matches the vault-wide UTC `YYYY-MM-DDTHH:MM:SSZ` timestamp convention.
+- **`axiom-fetch/fetcher.py`** — Network boundary for the layer. `fetch(url, timeout=30.0, max_bytes=20 MB, client=None)` uses `httpx`, follows redirects, sends the project user agent, and returns a `FetchResult`. Network, timeout, HTTP 4xx/5xx, and size-cap failures become `status="failed"` results; only programmer errors raise.
+- **`axiom-fetch/extractor.py`** — Pure extraction boundary. Supports `text/html` via BeautifulSoup + markdownify and `text/plain` as decoded Markdown passthrough. HTML extraction strips chrome tags (`script`, `style`, `nav`, `header`, `footer`, `aside`, `noscript`), chooses main content by `<main>`, `<article>`, `[role=main]`, `<body>`, then normalizes whitespace. PDF and DOCX intentionally raise `UnsupportedContentType` for now.
+- **`axiom-fetch/chunker.py`** — Pure fixed-character chunker. Defaults: `DEFAULT_CHUNK_SIZE = 2000`, `DEFAULT_OVERLAP = 200`, soft-boundary lookback of 50 characters. Returns frozen `Chunk` records with `text`, `index`, `char_count`, and `overlap_chars`. Token-aware chunking is deferred until provider/model choices in later phases need it.
+- **`axiom-fetch/pipeline.py`** — `ingest(url, store, chunk_size=..., overlap=...)` composes fetch, extract, chunk, and vault writes. Source files live under `fetch/sources/`, chunk files under `fetch/chunks/`. It writes the source before work starts (`pending`) so interrupted ingests leave visible intent in the vault; terminal source metadata records `succeeded`/`failed`, content type, title, chunk count, fetched timestamp, or error.
 
 ### Surviving Phase 0 artifacts
 
@@ -74,8 +84,8 @@ For the architectural plan and full checklist, see `PRD.md`.
 
 **Scaffold (committed and pushed)**
 
-- Five layer packages — `axiom-store`, `axiom-queue`, `axiom-fetch`, `axiom-brain`, `axiom-api` — each with stub `__init__.py` and `README.md` (the first two now have real implementations)
-- `pyproject.toml` — workspace config, hyphen filesystem names mapped to underscore Python import names via explicit `[tool.setuptools] packages` + `package-dir` (auto-discovery via `find` does not work with the flat per-layer layout). Runtime deps: `PyYAML>=6.0`. `testpaths` enumerates per-layer `tests/` directories.
+- Five layer packages — `axiom-store`, `axiom-queue`, `axiom-fetch`, `axiom-brain`, `axiom-api` — each with `__init__.py` and `README.md` (the first three now have real implementation surfaces)
+- `pyproject.toml` — workspace config, hyphen filesystem names mapped to underscore Python import names via explicit `[tool.setuptools] packages` + `package-dir` (auto-discovery via `find` does not work with the flat per-layer layout). Runtime deps: `PyYAML>=6.0`, `httpx>=0.27`, `beautifulsoup4>=4.12`, `markdownify>=0.11`. `testpaths` enumerates per-layer `tests/` directories.
 - `.gitignore` — covers Python, secrets (`mono-vault/`, `.env`), editor and OS artifacts
 - `.env.example` — placeholders for `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`, `OLLAMA_MODEL`, `VAULT_PATH`, `STORE_PORT`, `API_PORT`. The example `VAULT_PATH` is anchored to `/home/mono/Projects/mono-axiom/mono-vault`.
 - `LICENSE` — Apache 2.0
@@ -105,7 +115,7 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `axiom-store/frontmatter.py` — frontmatter parse/render
 - `axiom-store/filesystem.py` — `VaultFS` class, path discipline, all disk I/O for the vault
 - `axiom-store/cache.py` — `CachedVaultStore` write-through cache
-- `axiom-store/schema.py` — per-content-type schema definitions and `validate`. `JOB` schema rewritten in Phase 2.
+- `axiom-store/schema.py` — per-content-type schema definitions and `validate`. `JOB` schema rewritten in Phase 2; `FETCH_SOURCE` and `FETCH_CHUNK` schemas rewritten in Phase 3.
 - `axiom-store/protocol.py` — hybrid framing (parse/format, pure functions)
 - `axiom-store/server.py` — accept loop, `recv_until` + `recv_exact`, `dispatch`, CLI entry point
 - `axiom-store/client.py` — `StoreClient` with status-to-exception translation
@@ -113,12 +123,12 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `axiom-store/tests/test_frontmatter.py` — 18 tests
 - `axiom-store/tests/test_filesystem.py` — 29 tests
 - `axiom-store/tests/test_cache.py` — 16 tests
-- `axiom-store/tests/test_schema.py` — 21 tests (12 original + 9 new JOB tests pinning the Phase 2 shape and the old shape's rejection)
+- `axiom-store/tests/test_schema.py` — 37 tests (12 original + 9 JOB tests pinning the Phase 2 shape + 16 FETCH schema tests pinning the Phase 3 shape and old-shape rejection)
 - `axiom-store/tests/test_protocol.py` — 17 tests
 - `axiom-store/tests/test_dispatch.py` — 13 tests (pure dispatch, in-memory)
 - `axiom-store/tests/test_server.py` — 8 tests (real TCP, real socket, real round trip; now uses `LocalServer` from `axiom_store.test_utils`)
 - `axiom-store/tests/test_client.py` — 11 tests (real server + real client + status translation; now uses `LocalServer` from `axiom_store.test_utils`)
-- **Total: 139 passing.** (Phase 1: 130 → 139 after JOB schema migration tests.)
+- **Total: 155 passing.** (Phase 1: 130 → 139 after JOB schema migration tests → 155 after FETCH_SOURCE/FETCH_CHUNK migration tests.)
 
 **`axiom-queue` package (runnable service complete)**
 
@@ -138,7 +148,22 @@ For the architectural plan and full checklist, see `PRD.md`.
 - `axiom-queue/tests/test_dispatcher.py` — 10 tests
 - **Total: 146 passing.**
 
-**Repo-wide test count: 285 passing.**
+**`axiom-fetch` package (URL ingestion MVP complete)**
+
+- `axiom-fetch/__init__.py` — re-exports the public fetcher, extractor, chunker, ID, and pipeline surface.
+- `axiom-fetch/ids.py` — source IDs, chunk IDs, UTC timestamps.
+- `axiom-fetch/fetcher.py` — HTTP GET via `httpx`, redirect-aware, failure-as-data, response size cap.
+- `axiom-fetch/extractor.py` — HTML/plain-text to Markdown extraction.
+- `axiom-fetch/chunker.py` — overlapping fixed-character chunks with soft boundary handling.
+- `axiom-fetch/pipeline.py` — `ingest()` orchestration and vault persistence to `fetch/sources/` and `fetch/chunks/`.
+- `axiom-fetch/tests/test_ids.py`
+- `axiom-fetch/tests/test_fetcher.py`
+- `axiom-fetch/tests/test_extractor.py`
+- `axiom-fetch/tests/test_chunker.py`
+- `axiom-fetch/tests/test_pipeline.py`
+- **Total: 119 passing.**
+
+**Repo-wide test count: 420 passing.**
 
 **Decisions locked (Phase 1)**
 
@@ -180,6 +205,19 @@ For the architectural plan and full checklist, see `PRD.md`.
 - **Public surface widening in `axiom_store`:** schema instances (`JOB`, `FACT`, `SUMMARY`, `CONVERSATION`, `PERSONA`, `FETCH_SOURCE`, `FETCH_CHUNK`) re-exported. Sets the rule that schema instances are public for all consumers, not just `axiom-queue`.
 - **`LocalServer` and `send_request` promoted** from `axiom-store/tests/test_server.py` (where they were file-private) into `axiom_store.test_utils`. Public, importable, single source of truth for live-server tests across all layers.
 - **Rootless test layout adopted.** No `__init__.py` in `axiom-store/tests/` or `axiom-queue/tests/`. Avoids the `tests.*` namespace collision pytest creates when multiple package-shaped test directories exist in one repo. Phase 3, 4, 5 test directories also won't have `__init__.py`.
+
+**Decisions locked (Phase 3 — fetch ingestion MVP)**
+
+- **FETCH_SOURCE schema:** required keys are `id`, `type`, `status`, `url`, `created_at`, `updated_at`. Optional keys are `fetched_at`, `content_type`, `title`, `error`, `chunk_count`, `tags`. The old placeholder shape (`type`, `url`, `fetched_at`) is rejected.
+- **FETCH_CHUNK schema:** required keys are `id`, `type`, `source_id`, `chunk_index`, `chunk_total`, `created_at`, `char_count`. Optional keys are `overlap_chars`, `tags`. The old `source` field and `embedding_path` are rejected; embedding metadata belongs to later retrieval/index work.
+- **Source ID shape:** `src-<12 hex chars>`. Short enough for human inspection, enough entropy for a personal vault.
+- **Chunk ID shape:** `<source_id>-<index:04d>`. Chunk IDs are deterministic and naturally filename-sortable.
+- **HTTP boundary:** `fetcher.py` is the only module that performs network I/O. Tests inject `httpx.MockTransport` or monkeypatch the pipeline fetch call; no unit test calls the public internet.
+- **Failure model:** fetch and extraction failures are persisted as failed source metadata, not raised through `ingest()`. Programmer errors (`bad URL`, invalid chunk parameters, invalid body type) still raise.
+- **Supported extraction formats:** HTML and plain text only. PDF and DOCX remain deferred even though the PRD calls for them in Phase 3.
+- **HTML extraction heuristic:** strip chrome tags everywhere, then select main content by `<main>`, `<article>`, `[role=main]`, `<body>`, then whole document fallback.
+- **Chunking unit:** characters, not tokens. Defaults are 2000 characters with 200-character overlap. Token-aware chunking is deferred until provider-specific retrieval quality requires it.
+- **Two-phase source write:** `ingest()` writes a pending source before fetching and overwrites it with terminal `succeeded`/`failed` metadata later. A crash mid-ingest leaves visible intent in the vault.
 
 ---
 
@@ -255,7 +293,7 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 
 ## Phase 2 progress
 
-**Status:** runnable queue service complete. Final Phase 2 polish remains.
+**Status:** complete for the intentionally single-dispatcher milestone. True multi-worker process pooling is deferred until the store has an atomic claim primitive.
 
 **Concepts walked:**
 
@@ -294,21 +332,52 @@ Two Phase 1 surfaces were additively widened by Phase 2's needs. Both are extens
 
 ---
 
+## Phase 3 progress
+
+**Status:** URL ingestion MVP complete; broader retrieval layer still in progress.
+
+**Concepts walked:**
+
+- **Failure as vault state.** Fetch and extractor failures are recorded in `FETCH_SOURCE` frontmatter so operators can inspect what happened without searching logs.
+- **Network boundary discipline.** `fetcher.py` owns HTTP and returns structured results; extractor/chunker/pipeline logic is deterministic and testable without network access.
+- **Main-content extraction.** HTML conversion now strips site chrome, picks the most semantically meaningful content element available, and converts to Markdown with a small dependency rather than handwritten HTML parsing.
+- **Character chunking tradeoff.** Characters are deterministic and provider-independent; token-aware chunking remains a quality upgrade for later.
+- **Two-phase ingest.** Pending source write first, terminal update last, so interrupted work leaves an auditable marker in the vault.
+
+**Implementation done:**
+
+- `ids.py` — source/chunk ID and timestamp helpers.
+- `fetcher.py` — HTTP GET with redirect support, user agent, timeout, size cap, and failure-as-data result shape.
+- `extractor.py` — HTML and plain-text extraction to Markdown.
+- `chunker.py` — overlapping character chunking with soft boundary handling.
+- `pipeline.py` — `ingest()` writes source and chunk Markdown files through an injected store.
+- FETCH schemas migrated in `axiom-store/schema.py`.
+- Phase 3 tests added for schema, IDs, fetcher, extractor, chunker, and pipeline.
+
+**Checklist items unblocked:**
+
+- [x] Implement HTTP fetch boundary
+- [x] Implement HTML extraction to Markdown
+- [x] Implement plain-text extraction
+- [x] Implement chunking with overlap
+- [x] Implement source and chunk persistence to vault
+- [x] Milestone path confirmed in tests: URL ingestion produces source and chunk files in the vault
+
 ## What's documented but not yet implemented
 
-Everything in the PRD beyond `axiom-queue`'s runnable service. Remaining Phase 2 decision: whether to mark Phase 2 complete with the intentionally single-worker dispatcher, or build a true multi-worker process pool after adding an atomic claim primitive.
+Everything in the PRD beyond the current URL-ingestion slice of `axiom-fetch`: uploads, PDF/DOCX extraction, retrieval search/indexing, embeddings, `axiom-brain`, and `axiom-api`.
 
 ---
 
 ## Open questions / deferred decisions
 
 - Frontend framework for `axiom-api` — React vs vanilla JS, deferred to Phase 5
-- Embedding model and vector index strategy for `axiom-fetch` — deferred to Phase 3
-- `scripts/sync_vault_docs.py` — copy PRD + Documentation into `mono-vault/system/` on demand. Phase 1 manages this with a one-line `cp`; worth scripting if doc updates become more frequent in Phase 2
+- Embedding model and vector index strategy for `axiom-fetch` — still deferred; current Phase 3 work persists chunks but does not embed or search them yet
+- `scripts/sync_vault_docs.py` — copy PRD + Documentation into `mono-vault/system/` on demand. Still manual for now.
 - Manual vault edits invalidate the in-memory cache. Phase 1 ships with "restart `axiom-store` after manual edits" as the documented workaround. Upgrade to mtime-check on read in Phase 2 or 3 if it becomes annoying in practice — `test_known_limitation_out_of_band_edit_returns_stale` is pinned to fail when the upgrade lands
 - Atomic writes (write-temp + fsync + rename) are deferred. Single-writer assumption holds for now. Revisit when concurrent readers or crash-safety become real concerns
 - Persistent-connection upgrade for the client. One-shot is simple and works; if loopback overhead ever shows up in profiling, the upgrade path is documented (server-side connection loop, client-side connection pool). Not a Phase 2 concern
-- Per-job `timeout` field on jobs. Phase 2 ships with a fixed 5-minute stall threshold. When a job kind needs a different bound (long PDF chunking in Phase 3, slow LLM calls in Phase 4), promote the timeout into the JOB schema as an optional field.
+- Per-job `timeout` field on jobs. Phase 2 ships with a fixed 5-minute stall threshold. When a job kind needs a different bound (long PDF chunking, slow LLM calls), promote the timeout into the JOB schema as an optional field.
 - Watchdog detection of stuck `pending` jobs. Currently only `running` jobs can stall (worker crashed mid-claim). A bug in the dispatcher that loses pending-jobs is theoretically possible; not addressed in Phase 2.
 
 ---

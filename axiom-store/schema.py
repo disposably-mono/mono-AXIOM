@@ -73,13 +73,38 @@ JOB = Schema(
 )
 
 FETCH_SOURCE = Schema(
-    required={"type": str, "url": str, "fetched_at": str},
-    optional={"content_type": str, "tags": list, "title": str},
+    required={
+        "id": str,
+        "type": str,
+        "status": str,
+        "url": str,
+        "created_at": str,
+        "updated_at": str,
+    },
+    optional={
+        "fetched_at": str,
+        "content_type": str,
+        "title": str,
+        "error": str,
+        "chunk_count": int,
+        "tags": list,
+    },
 )
 
 FETCH_CHUNK = Schema(
-    required={"type": str, "source": str, "chunk_index": int},
-    optional={"tags": list, "embedding_path": str},
+    required={
+        "id": str,
+        "type": str,
+        "source_id": str,
+        "chunk_index": int,
+        "chunk_total": int,
+        "created_at": str,
+        "char_count": int,
+    },
+    optional={
+        "overlap_chars": int,
+        "tags": list,
+    },
 )
 
 

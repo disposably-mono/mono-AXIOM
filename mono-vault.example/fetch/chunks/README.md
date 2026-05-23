@@ -6,12 +6,17 @@ One chunk per file.
 Frontmatter schema:
 ```yaml
 ---
-chunk_id: <uuid>
-source_id: <uuid>
-position: <int>           # ordinal within source
-embedding_model: <name>   # if/when embeddings are added
+id: src-abc123def456-0000
+type: fetch_chunk
+source_id: src-abc123def456
+chunk_index: 0
+chunk_total: 12
+created_at: 2026-05-23T10:00:05Z
+char_count: 1847
+overlap_chars: 200        # optional, absent on first chunk
+tags: [research]          # optional
 ---
 ```
 
-Body is the chunk text. Chunk size and overlap policy lives in
-`system/config/fetch.md`.
+Body is the chunk text. Current defaults are 2000 characters per chunk
+with 200 characters of overlap.

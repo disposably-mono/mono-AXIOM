@@ -22,11 +22,11 @@ See [`PRD.md`](./PRD.md) for the full architecture and [`Documentation.md`](./Do
 
 ## Project status
 
-**Phase 2 — `axiom-queue` in progress.** `axiom-store` is complete, and `axiom-queue` now has job persistence, handlers, retry policy, worker loop, watchdog, and a runnable dispatcher service. Later layers are still stubbed.
+**Phase 3 — `axiom-fetch` in progress.** `axiom-store` is complete, `axiom-queue` is a runnable single-dispatcher queue service, and `axiom-fetch` now has a tested URL-ingestion path for fetching HTML/plain text, converting it to Markdown, chunking it, and persisting sources/chunks into the vault. Uploads, PDF/DOCX extraction, embeddings, search, `axiom-brain`, and `axiom-api` are still ahead.
 
 ## Getting started
 
-> Mono-AXIOM is in active development. These instructions will stabilize once `axiom-store` is functional.
+> Mono-AXIOM is in active development. The store and queue layers are usable; the fetch layer currently supports URL ingestion for HTML and plain text.
 
 ```bash
 # 1. Clone
@@ -45,6 +45,20 @@ cp .env.example .env
 # 4. Bootstrap the vault from the example skeleton
 python scripts/bootstrap_vault.py
 ```
+
+## Current runnable paths
+
+```bash
+# Store demo: exercises the TCP store against the local vault
+python -m axiom_store.server --vault /home/mono/Projects/mono-axiom/mono-vault -v
+python scripts/demo_axiom_store.py
+
+# Queue demo: submits an echo job and waits for the dispatcher to resolve it
+python -m axiom_queue.dispatcher --host 127.0.0.1 --port 7070
+python scripts/demo_axiom_queue.py
+```
+
+The fetch ingestion API is available as `axiom_fetch.ingest(url, store)` and writes to `fetch/sources/` plus `fetch/chunks/` through any store-compatible object.
 
 ## Repository layout
 

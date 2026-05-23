@@ -13,4 +13,12 @@ Web retrieval, document ingestion, and RAG chunking. Pulls content from URLs and
 
 ## Status
 
-Not yet implemented. Phase 3 (Weeks 9–11).
+Phase 3 in progress. The URL-ingestion MVP is implemented and tested:
+
+- HTTP fetch with redirect support, timeout handling, user agent, and response size cap
+- HTML extraction via BeautifulSoup + markdownify
+- Plain-text extraction
+- Fixed-character chunking with overlap and soft boundary handling
+- `ingest(url, store)` pipeline that writes `fetch/sources/<source_id>.md` and `fetch/chunks/<source_id>-NNNN.md`
+
+Still deferred: uploads, PDF/DOCX extraction, embeddings, retrieval/search, and queue-handler integration.
